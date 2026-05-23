@@ -1,16 +1,38 @@
 const express = require('express');
 const multer = require('multer');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+// 🛠️ Remplacement d'Anthropic par Google Gen AI
+const { GoogleGenAI } = require('@google/genai'); 
 const XLSX = require('xlsx');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+// 🛠️ Initialisation avec votre clé Render existante
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }); 
 
 app.use(express.static('public'));
 app.use(express.json());
 
-const PROMPT = `Tu es un assistant spécialisé dans la lecture de factures de chantier BTP français pour un gestionnaire de compte prorata.
+app.post('/api/extract', upload.fields([
+  { name: 'invoices', maxCount: 50 },
+  { name: 'template', maxCount: 1 }
+]), async (req, res) => {
+  try {
+    const invoiceFiles = req.files['invoices'] || [];
+    const templateFile = req.files['template']?.[0];
+
+    if (!templateFile) return res.status(400).json({ error: 'Template Excel manquant' });
+    if (invoiceFiles.length === 0) return res.status(400).json({ error: 'Aucune facture fournie' });
+
+    const extractedRows = [];
+
+    for (const file of invoiceFiles) {
+      const base64 = file.buffer.toString('base64');
+      
+      // Configuration du prompt pour Gemini
+      const prompt = `Tu es un assistant spécialisé dans la lecture de factures de chantier BTP français pour un gestionnaire de compte prorata.
 Analyse cette facture et extrais les informations suivantes au format JSON strict.
 Si une information est absente ou illisible, mets null.
 
@@ -29,51 +51,25 @@ Format attendu:
   }
 ]
 
-Lignes budgétaires disponibles (choisir le numéro le plus pertinent) :
-1=Voirie/domaine public, 2=Clôtures/palissades, 3=Voies de circulation, 4=Aire de lavage,
-5=Installation électrique, 6=Aérothermes, 7=Signalétique, 8=Préchauffage aérothermes,
-9=Elect. préchauffage, 10=Fermetures provisoires, 11=Reportage photo, 12=Base vie installation,
-13=Bungalows cantonnement, 14=Bungalows bureaux, 15=Assurance bungalows, 16=Reprographie/cafetière,
-17=Entretien bungalows, 18=Eau, 19=Electricité, 20=Téléphone/Internet,
-21=Bungalows logistique, 22=Equipe logistique, 23=Badges, 24=Agent cynophile,
-25=Télésurveillance, 26=Fontaines eau, 27=Extincteurs, 28=EPI, 29=Infirmière,
-30=Sanitaires autonomes, 31=Sanitaires définitifs, 32=Signalétique sécurité,
-33=Protections collectives, 34=Lifts, 35=Ascenseurs/monte-charge, 36=Liftiers,
-37=Echafaudages, 38=Nettoyage base vie, 39=Déchets ménagers, 40=Nettoyage circulations,
-41=Nettoyage sans tiers, 42=Balayeuse HP, 43=Containers/mini-bennes, 44=Manitou/cariste,
-45=Agent nettoyage, 46=Bennes de chantier, 47=Nettoyage OPR/réception, 48=Aléas, 49=Honoraires
-
-Notes:
-- date: date d'émission au format JJ/MM/AA
-- montant_ht: montant hors taxes en nombre décimal (sans symbole €)
-- mois: mois de la prestation au format MM/AAAA (utilise le mois de la date si non précisé)
-- ligne_budgetaire: numéro entier parmi la liste ci-dessus`;
-
-app.post('/api/extract', upload.fields([
-  { name: 'invoices', maxCount: 50 },
-  { name: 'template', maxCount: 1 }
-]), async (req, res) => {
-  try {
-    const invoiceFiles = req.files['invoices'] || [];
-    const templateFile = req.files['template']?.[0];
-
-    if (!templateFile) return res.status(400).json({ error: 'Template Excel manquant' });
-    if (invoiceFiles.length === 0) return res.status(400).json({ error: 'Aucune facture fournie' });
-
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    const extractedRows = [];
-
-    for (const file of invoiceFiles) {
-      const base64 = file.buffer.toString('base64');
-      const mimeType = file.mimetype || 'application/pdf';
+Lignes budgétaires disponibles :
+1=Voirie/domaine public, 2=Clôtures/palissades, 3=Voies de circulation, 4=Aire de lavage, 5=Installation électrique, 6=Aérothermes, 7=Signalétique, 8=Préchauffage aérothermes, 9=Installation électrique préchauffage, 10=Fermetures provisoires, 11=Reportage photo, 12=Base vie installation, 13=Bungalows cantonnement, 14=Bungalows bureaux, 15=Assurance bungalows, 16=Reprographie/cafetière, 17=Entretien bungalows, 18=Eau, 19=Electricité, 20=Téléphone/Internet, 21=Bungalows logistique/contrôle accès, 22=Equipe logistique/contrôle accès, 23=Badges, 24=Agent cynophile, 25=Télésurveillance, 26=Fontaines eau, 27=Extincteurs, 28=EPI, 29=Infirmière, 30=Sanitaires autonomes, 31=Sanitaires définitifs, 32=Signalétique sécurité, 33=Protections collectives, 34=Lifts, 35=Ascenseurs/monte-charge, 36=Liftiers, 37=Echafaudages, 38=Nettoyage base vie, 39=Déchets ménagers, 40=Nettoyage circulations, 41=Nettoyage sans tiers, 42=Balayeuse HP, 43=Containers/mini-bennes, 44=Manitou/cariste, 45=Agent nettoyage/manutention, 46=Bennes de chantier, 47=Nettoyage OPR/réception, 48=Aléas, 49=Honoraires`;
 
       try {
-        const result = await model.generateContent([
-          { inlineData: { data: base64, mimeType } },
-          PROMPT
-        ]);
+        // 🛠️ Appel natif à Gemini Flash (ultra rapide et efficace pour les factures)
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [
+            prompt,
+            {
+              inlineData: {
+                mimeType: file.mimetype,
+                data: base64
+              }
+            }
+          ],
+        });
 
-        const text = result.response.text();
+        const text = response.text || '[]';
         const clean = text.replace(/```json|```/g, '').trim();
         const rows = JSON.parse(clean);
         rows.forEach(r => { r._filename = file.originalname; });
@@ -88,6 +84,7 @@ app.post('/api/extract', upload.fields([
       }
     }
 
+    // --- Le reste de la logique d'écriture Excel reste 100% identique ---
     const wb = XLSX.read(templateFile.buffer, { type: 'buffer', cellFormulas: true });
     const ws = wb.Sheets['Facture'];
 
