@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SGFC — Lecture automatique de factures</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --blue: #185FA5; --blue-light: #E6F1FB; --blue-dark: #0C447C;
+    --green: #3B6D11; --green-light: #EAF3DE; --green-dark: #27500A;
+    --red: #E24B4A; --red-light: #FCEBEB; --red-dark: #501313;
+    --amber-light: #FAEEDA; --amber-dark: #633806;
+    --gray-50: #F8F8F7; --gray-100: #F1EFE8; --gray-200: #D3D1C7;
+    --gray-500: #888780; --gray-700: #444441; --gray-900: #2C2C2A;
+    --radius: 8px; --radius-lg: 12px;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  body { font-family: var(--font); background: var(--gray-50); color: var(--gray-900); min-height: 100vh; }
+  .topbar { background: white; border-bottom: 1px solid var(--gray-200); padding: 0 2rem; height: 56px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 10; }
+  .topbar-logo { font-weight: 700; font-size: 16px; color: var(--blue); letter-spacing: -0.3px; }
+  .topbar-sep { color: var(--gray-200); font-size: 20px; }
+  .topbar-title { font-size: 14px; color: var(--gray-500); }
+  .container { max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem; }
+  .steps { display: flex; gap: 6px; margin-bottom: 2rem; }
+  .step { flex: 1; padding: 10px; border-radius: var(--radius); border: 1px solid var(--gray-200); background: white; text-align: center; font-size: 12px; color: var(--gray-500); }
+  .step .num { display: block; font-size: 18px; font-weight: 700; margin-bottom: 2px; }
+  .step.active { border-color: var(--blue); background: var(--blue-light); color: var(--blue-dark); }
+  .step.done { border-color: var(--green); background: var(--green-light); color: var(--green-dark); }
+  .card { background: white; border: 1px solid var(--gray-200); border-radius: var(--radius-lg); padding: 1.5rem; margin-bottom: 1.25rem; }
+  .card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 1.25rem; }
+  .card-icon { width: 36px; height: 36px; border-radius: var(--radius); background: var(--blue-light); display: flex; align-items: center; justify-content: center; font-size: 18px; }
+  .card-header h2 { font-size: 15px; font-weight: 600; }
+  .card-header p { font-size: 12px; color: var(--gray-500); margin-top: 2px; }
+  .drop-zone { border: 2px dashed var(--gray-200); border-radius: var(--radius); padding: 2.5rem 1rem; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--gray-50); }
+  .drop-zone:hover, .drop-zone.over { border-color: var(--blue); background: var(--blue-light); }
+  .drop-zone.loaded { border-color: var(--green); background: var(--green-light); }
+  .drop-zone .dz-icon { font-size: 36px; margin-bottom: 10px; }
+  .drop-zone p { font-size: 13px; color: var(--gray-500); }
+  .drop-zone p strong { color: var(--gray-900); }
+  input[type=file] { display: none; }
+  .btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 18px; border-radius: var(--radius); border: 1px solid var(--gray-200); background: white; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--gray-900); transition: all 0.15s; font-family: var(--font); }
+  .btn:hover { background: var(--gray-100); border-color: var(--gray-500); }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+  .btn-primary { background: var(--blue); color: white; border-color: var(--blue); }
+  .btn-primary:hover { background: var(--blue-dark); border-color: var(--blue-dark); }
+  .btn-success { background: var(--green); color: white; border-color: var(--green); }
+  .btn-success:hover { background: var(--green-dark); border-color: var(--green-dark); }
+  .btn-danger { background: var(--red-light); color: var(--red-dark); border-color: transparent; padding: 5px 9px; font-size: 12px; }
+  .btn-danger:hover { background: #F7C1C1; }
+  .inv-list { display: flex; flex-direction: column; gap: 8px; margin: 1rem 0; }
+  .inv-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--radius); border: 1px solid var(--gray-200); background: var(--gray-50); }
+  .inv-item .fname { flex: 1; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 99px; }
+  .b-pending { background: var(--gray-100); color: var(--gray-500); }
+  .b-ok { background: var(--green-light); color: var(--green-dark); }
+  .b-error { background: var(--red-light); color: var(--red-dark); }
+  .alert { padding: 12px 16px; border-radius: var(--radius); font-size: 13px; line-height: 1.5; margin-bottom: 1rem; }
+  .alert-info { background: var(--blue-light); color: var(--blue-dark); border: 1px solid #B5D4F4; }
+  .alert-success { background: var(--green-light); color: var(--green-dark); border: 1px solid #C0DD97; }
+  .alert-error { background: var(--red-light); color: var(--red-dark); border: 1px solid #F7C1C1; }
+  .alert-warn { background: var(--amber-light); color: var(--amber-dark); border: 1px solid #FAC775; }
+  .progress { height: 6px; background: var(--gray-100); border-radius: 99px; overflow: hidden; margin: 10px 0; }
+  .progress-fill { height: 100%; background: var(--blue); border-radius: 99px; transition: width 0.4s; }
+  .table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--gray-200); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.04em; padding: 9px 12px; background: var(--gray-50); border-bottom: 1px solid var(--gray-200); text-align: left; white-space: nowrap; }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--gray-100); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--gray-50); }
+  .editable { width: 100%; background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 3px 6px; font-size: 12px; font-family: var(--font); color: var(--gray-900); }
+  .editable:focus { border-color: var(--blue); outline: none; background: white; }
+  select.editable { cursor: pointer; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 1rem; }
+  .hidden { display: none !important; }
+  .spin { display: inline-block; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 1.25rem; }
+  .stat-card { background: var(--gray-50); border-radius: var(--radius); padding: 14px 16px; border: 1px solid var(--gray-200); }
+  .stat-card .label { font-size: 11px; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+  .stat-card .value { font-size: 22px; font-weight: 700; color: var(--gray-900); }
+  .stat-card .value.blue { color: var(--blue); }
+  .stat-card .value.green { color: var(--green); }
+  .file-added { border-color: var(--green) !important; }
+  .row-error td { background: var(--red-light) !important; }
+  @media (max-width: 600px) { .stat-grid { grid-template-columns: 1fr 1fr; } .steps span { display: none; } }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-logo">SGFC</div>
+  <div class="topbar-sep">|</div>
+  <div class="topbar-title">Lecture automatique de factures — Compte Prorata</div>
+</div>
+
+<div class="container">
+
+  <div class="steps">
+    <div class="step active" id="s1"><span class="num">1</span><span>Template Excel</span></div>
+    <div class="step" id="s2"><span class="num">2</span><span>Factures</span></div>
+    <div class="step" id="s3"><span class="num">3</span><span>Extraction IA</span></div>
+    <div class="step" id="s4"><span class="num">4</span><span>Export</span></div>
+  </div>
+
+  <!-- STEP 1 -->
+  <div class="card" id="card1">
+    <div class="card-header">
+      <div class="card-icon">📊</div>
+      <div><h2>Fichier Excel template</h2><p>Ton fichier SGFC_Tableau_de_gestion_Type.xlsx</p></div>
+    </div>
+    <div class="drop-zone" id="xlsxDrop" onclick="document.getElementById('xlsxIn').click()"
+      ondragover="doDrag(event,'xlsxDrop')" ondragleave="undrag('xlsxDrop')" ondrop="dropXlsx(event)">
+      <div class="dz-icon">📁</div>
+      <p id="xlsxLabel"><strong>Glisse ton template ici</strong> ou clique pour sélectionner<br><span style="font-size:11px;">Fichier .xlsx uniquement</span></p>
+    </div>
+    <input type="file" id="xlsxIn" accept=".xlsx" onchange="loadXlsx(this.files[0])">
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="card hidden" id="card2">
+    <div class="card-header">
+      <div class="card-icon">🧾</div>
+      <div><h2>Factures à importer</h2><p>PDF ou images JPG/PNG — plusieurs fichiers possibles</p></div>
+    </div>
+    <div class="drop-zone" id="invDrop" onclick="document.getElementById('invIn').click()"
+      ondragover="doDrag(event,'invDrop')" ondragleave="undrag('invDrop')" ondrop="dropInv(event)">
+      <div class="dz-icon">📂</div>
+      <p><strong>Glisse tes factures ici</strong> ou clique pour sélectionner<br><span style="font-size:11px;">PDF, JPG, PNG — sélection multiple autorisée</span></p>
+    </div>
+    <input type="file" id="invIn" accept=".pdf,.jpg,.jpeg,.png" multiple onchange="addFiles(this.files)">
+    <div class="inv-list" id="invList"></div>
+    <div class="actions hidden" id="step2Actions">
+      <button class="btn btn-primary" onclick="launch()">🤖 Analyser avec l'IA</button>
+      <button class="btn" onclick="document.getElementById('invIn').click()">+ Ajouter d'autres</button>
+    </div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="card hidden" id="card3">
+    <div class="card-header">
+      <div class="card-icon">🧠</div>
+      <div><h2>Extraction en cours</h2><p>Claude analyse chaque facture...</p></div>
+    </div>
+    <div id="progressArea">
+      <div class="alert alert-info" id="progressMsg">⏳ Initialisation...</div>
+      <div class="progress"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+    </div>
+    <div id="resultArea" class="hidden">
+      <div class="stat-grid" id="stats"></div>
+      <div class="alert alert-success hidden" id="successMsg"></div>
+      <div class="alert alert-warn hidden" id="warnMsg"></div>
+      <div class="table-wrap" id="tableWrap"></div>
+      <div class="actions" style="margin-top:1.25rem;">
+        <button class="btn btn-primary" id="btnConfirm" onclick="confirmExport()">✅ Confirmer et télécharger l'Excel</button>
+        <button class="btn" onclick="document.getElementById('invIn').click()">+ Ajouter d'autres factures</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="card hidden" id="card4">
+    <div class="card-header">
+      <div class="card-icon">⬇️</div>
+      <div><h2>Export prêt</h2><p>Télécharge ton fichier Excel mis à jour</p></div>
+    </div>
+    <div id="exportArea"></div>
+    <div class="actions" style="margin-top:1rem;">
+      <button class="btn btn-success" id="btnDl" onclick="downloadFile()">⬇️ Télécharger le fichier Excel</button>
+      <button class="btn" onclick="reset()">🔄 Nouveau dossier</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let xlsxFile = null;
+let invoices = [];
+let apiResult = null;
+let extractedRows = [];
+
+const LIGNE_BUDG = {
+  1:'Voirie/domaine public',2:'Clôtures/palissades',3:'Voies de circulation',4:'Aire de lavage',
+  5:'Installation électrique',6:'Aérothermes',7:'Signalétique extérieure',8:'Préchauffage aérothermes',
+  9:'Elect. préchauffage',10:'Fermetures provisoires',11:'Reportage photo',12:'Base vie installation',
+  13:'Bungalows cantonnement',14:'Bungalows bureaux',15:'Assurance bungalows',16:'Reprographie/cafetière',
+  17:'Entretien bungalows',18:'Eau',19:'Electricité',20:'Téléphone/Internet',
+  21:'Bungalows logistique',22:'Equipe logistique',23:'Badges',24:'Agent cynophile',
+  25:'Télésurveillance',26:'Fontaines eau',27:'Extincteurs',28:'EPI',29:'Infirmière',
+  30:'Sanitaires autonomes',31:'Sanitaires définitifs',32:'Signalétique sécurité',
+  33:'Protections collectives',34:'Lifts',35:'Ascenseurs/monte-charge',36:'Liftiers',
+  37:'Echafaudages',38:'Nettoyage base vie',39:'Déchets ménagers',40:'Nettoyage circulations',
+  41:'Nettoyage sans tiers',42:'Balayeuse HP',43:'Containers/mini-bennes',44:'Manitou/cariste',
+  45:'Agent nettoyage',46:'Bennes de chantier',47:'Nettoyage OPR/réception',48:'Aléas',49:'Honoraires'
+};
+
+function doDrag(e, id) { e.preventDefault(); document.getElementById(id).classList.add('over'); }
+function undrag(id) { document.getElementById(id).classList.remove('over'); }
+function dropXlsx(e) { e.preventDefault(); undrag('xlsxDrop'); loadXlsx(e.dataTransfer.files[0]); }
+function dropInv(e) { e.preventDefault(); undrag('invDrop'); addFiles(e.dataTransfer.files); }
+
+function loadXlsx(f) {
+  if (!f || !f.name.endsWith('.xlsx')) { alert('Fichier .xlsx requis'); return; }
+  xlsxFile = f;
+  const dz = document.getElementById('xlsxDrop');
+  dz.classList.add('loaded');
+  document.getElementById('xlsxLabel').innerHTML = `✅ <strong>${f.name}</strong> chargé (${(f.size/1024).toFixed(0)} Ko)`;
+  setStep(1,'done'); setStep(2,'active');
+  document.getElementById('card2').classList.remove('hidden');
+}
+
+function addFiles(files) {
+  Array.from(files).forEach(f => {
+    if (!invoices.find(i => i.name === f.name)) invoices.push({ file: f, name: f.name });
+  });
+  renderList();
+  if (invoices.length > 0) document.getElementById('step2Actions').classList.remove('hidden');
+}
+
+function removeInv(i) {
+  invoices.splice(i,1); renderList();
+  if (invoices.length === 0) document.getElementById('step2Actions').classList.add('hidden');
+}
+
+function renderList() {
+  const el = document.getElementById('invList');
+  el.innerHTML = invoices.map((inv,i) => `
+    <div class="inv-item">
+      <span>${inv.name.endsWith('.pdf') ? '📄' : '🖼️'}</span>
+      <span class="fname">${inv.name}</span>
+      <span class="badge b-pending">En attente</span>
+      <button class="btn btn-danger" onclick="removeInv(${i})">✕</button>
+    </div>`).join('');
+}
+
+async function launch() {
+  if (!xlsxFile || invoices.length === 0) return;
+  setStep(2,'done'); setStep(3,'active');
+  document.getElementById('card3').classList.remove('hidden');
+  document.getElementById('progressArea').classList.remove('hidden');
+  document.getElementById('resultArea').classList.add('hidden');
+  document.getElementById('progressMsg').textContent = `⏳ Envoi de ${invoices.length} facture(s) au serveur...`;
+  document.getElementById('progressFill').style.width = '15%';
+
+  const fd = new FormData();
+  fd.append('template', xlsxFile);
+  invoices.forEach(inv => fd.append('invoices', inv.file));
+
+  try {
+    document.getElementById('progressMsg').textContent = `🧠 Claude analyse vos factures (peut prendre 30-60s)...`;
+    document.getElementById('progressFill').style.width = '50%';
+
+    const resp = await fetch('/api/extract', { method: 'POST', body: fd });
+    const data = await resp.json();
+
+    if (!resp.ok) throw new Error(data.error || 'Erreur serveur');
+
+    document.getElementById('progressFill').style.width = '100%';
+    document.getElementById('progressMsg').innerHTML = `✅ Extraction terminée !`;
+    apiResult = data;
+    extractedRows = data.extracted;
+
+    setTimeout(() => {
+      document.getElementById('progressArea').classList.add('hidden');
+      showResults(data);
+    }, 600);
+  } catch (err) {
+    document.getElementById('progressMsg').innerHTML = `❌ Erreur : ${err.message}`;
+    document.getElementById('progressMsg').className = 'alert alert-error';
+  }
+}
+
+function showResults(data) {
+  const rows = data.extracted;
+  const ok = rows.filter(r => !r._error);
+  const errors = rows.filter(r => r._error);
+  const total = ok.reduce((s,r) => s + (parseFloat(r.montant_ht)||0), 0);
+
+  document.getElementById('stats').innerHTML = `
+    <div class="stat-card"><div class="label">Factures extraites</div><div class="value blue">${ok.length}</div></div>
+    <div class="stat-card"><div class="label">Total HT</div><div class="value green">${total.toLocaleString('fr-FR',{minimumFractionDigits:2})} €</div></div>
+    <div class="stat-card"><div class="label">Erreurs</div><div class="value ${errors.length>0?'':'green'}">${errors.length}</div></div>`;
+
+  if (ok.length > 0) {
+    const sm = document.getElementById('successMsg');
+    sm.innerHTML = `<strong>${ok.length} ligne(s)</strong> prête(s) à insérer dans l'onglet Facture à partir de la ligne ${data.startRow}. Vérifiez et corrigez si besoin avant de télécharger.`;
+    sm.classList.remove('hidden');
+  }
+  if (errors.length > 0) {
+    const wm = document.getElementById('warnMsg');
+    wm.innerHTML = `⚠️ ${errors.length} facture(s) n'ont pas pu être lues : ${errors.map(e=>e._filename).join(', ')}`;
+    wm.classList.remove('hidden');
+  }
+
+  const ligneOpts = Object.entries(LIGNE_BUDG).map(([k,v]) => `<option value="${k}">${k} — ${v}</option>`).join('');
+
+  let html = `<table><thead><tr>
+    <th>Fichier source</th><th>Date</th><th>Fournisseur</th><th>N° Facture</th>
+    <th>Objet</th><th>Montant HT</th><th>Ligne budg.</th><th>Mois</th>
+  </tr></thead><tbody>`;
+
+  rows.forEach((row, i) => {
+    if (row._error) {
+      html += `<tr class="row-error"><td colspan="8">❌ ${row._filename} — ${row._error}</td></tr>`;
+      return;
+    }
+    html += `<tr>
+      <td style="font-size:11px;color:#888;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${row._filename||''}</td>
+      <td><input class="editable" style="width:75px" value="${e(row.date)}" onchange="extractedRows[${i}].date=this.value"></td>
+      <td><input class="editable" style="width:130px" value="${e(row.fournisseur)}" onchange="extractedRows[${i}].fournisseur=this.value"></td>
+      <td><input class="editable" style="width:100px" value="${e(row.numero_facture)}" onchange="extractedRows[${i}].numero_facture=this.value"></td>
+      <td><input class="editable" style="width:160px" value="${e(row.objet)}" onchange="extractedRows[${i}].objet=this.value"></td>
+      <td><input class="editable" style="width:80px;text-align:right" value="${row.montant_ht||''}" onchange="extractedRows[${i}].montant_ht=parseFloat(this.value)||null"></td>
+      <td><select class="editable" style="width:90px" onchange="extractedRows[${i}].ligne_budgetaire=this.value">
+        <option value="">—</option>${ligneOpts.replace(`value="${row.ligne_budgetaire}"`,`value="${row.ligne_budgetaire}" selected`)}
+      </select></td>
+      <td><input class="editable" style="width:75px" value="${e(row.mois)}" onchange="extractedRows[${i}].mois=this.value"></td>
+    </tr>`;
+  });
+
+  html += '</tbody></table>';
+  document.getElementById('tableWrap').innerHTML = html;
+  document.getElementById('resultArea').classList.remove('hidden');
+  setStep(3,'done'); setStep(4,'active');
+  document.getElementById('card4').classList.remove('hidden');
+}
+
+async function confirmExport() {
+  const btn = document.getElementById('btnConfirm');
+  btn.disabled = true;
+  btn.textContent = '⏳ Génération du fichier...';
+
+  const fd = new FormData();
+  fd.append('template', xlsxFile);
+  invoices.forEach(inv => fd.append('invoices', inv.file));
+
+  try {
+    const resp = await fetch('/api/extract', { method: 'POST', body: fd });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error);
+    apiResult = data;
+    showExport(data);
+  } catch(err) {
+    btn.disabled = false;
+    btn.textContent = '✅ Confirmer et télécharger l\'Excel';
+    alert('Erreur : ' + err.message);
+  }
+}
+
+function showExport(data) {
+  const ok = data.extracted.filter(r => !r._error);
+  const total = ok.reduce((s,r) => s + (parseFloat(r.montant_ht)||0), 0);
+  document.getElementById('exportArea').innerHTML = `
+    <div class="alert alert-success">
+      ✅ Fichier prêt — <strong>${ok.length} facture(s)</strong> insérée(s) dans l'onglet <strong>Facture</strong>
+      (lignes ${data.startRow} à ${data.startRow + ok.length - 1}).<br>
+      Montant total HT : <strong>${total.toLocaleString('fr-FR',{minimumFractionDigits:2})} €</strong>
+    </div>`;
+}
+
+function downloadFile() {
+  if (!apiResult?.fileBase64) { alert('Lance d\'abord l\'extraction'); return; }
+  const bytes = Uint8Array.from(atob(apiResult.fileBase64), c => c.charCodeAt(0));
+  const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = apiResult.filename;
+  a.click();
+}
+
+function reset() {
+  xlsxFile = null; invoices = []; apiResult = null; extractedRows = [];
+  ['card2','card3','card4'].forEach(id => document.getElementById(id).classList.add('hidden'));
+  document.getElementById('xlsxDrop').classList.remove('loaded');
+  document.getElementById('xlsxLabel').innerHTML = '<strong>Glisse ton template ici</strong> ou clique pour sélectionner<br><span style="font-size:11px;">Fichier .xlsx uniquement</span>';
+  document.getElementById('invList').innerHTML = '';
+  document.getElementById('step2Actions').classList.add('hidden');
+  document.getElementById('progressMsg').className = 'alert alert-info';
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('resultArea').classList.add('hidden');
+  document.getElementById('exportArea').innerHTML = '';
+  document.getElementById('btnConfirm').disabled = false;
+  document.getElementById('btnConfirm').textContent = '✅ Confirmer et télécharger l\'Excel';
+  ['s1','s2','s3','s4'].forEach((id,i) => {
+    document.getElementById(id).className = 'step' + (i===0?' active':'');
+  });
+}
+
+function setStep(n, state) { document.getElementById('s'+n).className = 'step ' + state; }
+function e(s) { return String(s||'').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+</script>
+</body>
+</html>
